@@ -2,7 +2,7 @@ from gpiozero import DistanceSensor
 import socketio
 import time
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import statistics
 import threading
@@ -19,7 +19,6 @@ personas_contadas = 0
 ventana_lecturas = []  # Para almacenar lecturas recientes
 persona_deteccionada = False
 DEBOUNCE_TIME = 0.5  # Pausa entre mediciones
-ultimo_envio_post = time.time()  # Para manejar el envío POST cada hora
 
 # Lock para proteger el acceso a `personas_contadas`
 personas_lock = threading.Lock()
@@ -28,9 +27,7 @@ personas_lock = threading.Lock()
 def enviar_websocket():
     try:
         sio.connect(websocket_url)
-        # Leer `personas_contadas` de forma segura dentro del Lock
-        with personas_lock:
-            sio.emit('personasDentro', personas_contadas)
+        sio.emit('personasDentro', 12345)  # Enviar un mensaje con un ID o conteo
         print("Mensaje enviado al WebSocket")
         sio.disconnect()
     except Exception as e:
@@ -109,14 +106,21 @@ def monitorizar_distancia():
         # Pausa entre mediciones
         time.sleep(DEBOUNCE_TIME)
 
-# Función para enviar los datos cada hora
+# Función para enviar los datos exactamente a cada hora local
 def enviar_datos_cada_hora():
-    global ultimo_envio_post
+    timezone = pytz.timezone("America/Mexico_City")
     while True:
-        if time.time() - ultimo_envio_post >= 3600:  # Si ha pasado una hora
-            enviar_peticion_post()
-            ultimo_envio_post = time.time()  # Actualizar el tiempo del último envío
-        time.sleep(60)  # Comprobar cada minuto si ya ha pasado 1 hora
+        now = datetime.now(timezone)
+        # Calcular la próxima hora exacta
+        proxima_hora = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+        tiempo_para_esperar = (proxima_hora - now).total_seconds()
+        print(f"Esperando {tiempo_para_esperar:.2f} segundos para el próximo envío a la hora: {proxima_hora.strftime('%H:%M')}")
+
+        # Esperar hasta la próxima hora
+        time.sleep(tiempo_para_esperar)
+
+        # Enviar los datos
+        enviar_peticion_post()
 
 # Función principal para iniciar los hilos
 def main():
