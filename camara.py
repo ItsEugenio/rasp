@@ -8,15 +8,12 @@ import requests
 from datetime import datetime
 import threading
 
-# Conexión con socket
 sio = socketio.Client()
 sio.connect('http://54.198.117.11')
 
-# Cargar modelo YOLOv5 con menos peso para Raspberry Pi
-model = torch.hub.load('ultralytics/yolov5', 'yolov5n', pretrained=True)  # 'yolov5n' es una versión ligera de YOLOv5
+model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
 model.eval()
 
-# Variables compartidas
 detected_persons = {}
 hourly_count = {}
 current_hour = datetime.now().replace(minute=0, second=0, microsecond=0)
@@ -25,10 +22,10 @@ last_request_time = None
 RETENTION_TIME = 2
 IOU_THRESHOLD = 0.005
 POST_ENDPOINT = 'http://107.23.14.43/registro'
-frame_interval = 10  # Procesar cada 10 frames para reducir carga en CPU
+frame_interval = 2
 frame_count = 0
 
-# Locks y conteo para patrón lector-escritor
+# Locks and Conditions for readers-writers pattern
 read_lock = threading.Lock()
 write_lock = threading.Lock()
 read_count = 0
@@ -52,14 +49,14 @@ def reader_lock():
     with read_lock:
         read_count += 1
         if read_count == 1:
-            write_lock.acquire()  # Bloquear escritores si hay al menos un lector
+            write_lock.acquire()  # Block writers if there is at least one reader
 
 def reader_unlock():
     global read_count
     with read_lock:
         read_count -= 1
         if read_count == 0:
-            write_lock.release()  # Permitir escritores si no hay lectores
+            write_lock.release()  # Allow writers if there are no readers
 
 def writer_lock():
     write_lock.acquire()
@@ -99,12 +96,12 @@ def update_detected_persons(persons):
                 sio.emit('personasFuera', 12345)
                 hourly_count[current_hour] = hourly_count.get(current_hour, 0) + 1
 
-        # Remover entradas antiguas de detected_persons
+        # Remove old entries from detected_persons
         keys_to_remove = [k for k, v in detected_persons.items() if (current_time - v) > RETENTION_TIME]
         for k in keys_to_remove:
             del detected_persons[k]
 
-        # Actualizar detected_persons con current_persons
+        # Update detected_persons with current_persons
         detected_persons.update(current_persons)
     finally:
         writer_unlock()
@@ -141,9 +138,6 @@ def process_frame():
 
     ret, frame = cap.read()
     if ret:
-        # Reducir resolución del frame para acelerar el procesamiento
-        frame = cv2.resize(frame, (320, 240))
-
         if frame_count % frame_interval == 0:
             persons = detect_persons(frame)
             threading.Thread(target=update_detected_persons, args=(persons,)).start()
@@ -161,21 +155,17 @@ def process_frame():
             canvas.create_image(0, 0, anchor=NW, image=photo)
         
         frame_count += 1
-
-        # Enviar datos al servidor cada hora
         if datetime.now().minute == 0 and datetime.now().second < 10:
             threading.Thread(target=send_hourly_count).start()
 
-    window.after(30, process_frame)  # Reducir la frecuencia de actualización para disminuir la carga en la CPU
+    window.after(10, process_frame)
 
-# Configurar la captura de video
 cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
 
-# Configuración de la ventana de Tkinter
 window = Tk()
-window.title("Detección de Personas con YOLOv5 (Optimizado para Raspberry Pi)")
+window.title("Detección de Personas con YOLOv5")
 
 canvas = Canvas(window, width=320, height=240)
 canvas.pack()
